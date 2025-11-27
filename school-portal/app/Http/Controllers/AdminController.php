@@ -32,8 +32,8 @@ class AdminController extends Controller
     // List all classes for admin management
     public function listClasses(Request $request)
     {
-        // Include soft-deleted classes so admin can manage them
-        return ClassModel::withTrashed()->with('teacher', 'students')->latest()->get();
+        // Exclude soft-deleted classes from admin UI
+        return ClassModel::with('teacher', 'students')->latest()->get();
     }
 
     // List class requests pending approval
@@ -45,27 +45,30 @@ class AdminController extends Controller
     // List course requests (courses pending admin approval)
     public function listCourseRequests(Request $request)
     {
+        // Exclude soft-deleted courses from admin UI
         return Course::where('status', 'pending')->with('teacher')->latest()->get();
     }
 
     // Approve a course (set status to approved)
-    public function approveCourseRequest(Request $request, Course $course)
+    public function approveCourseRequest(Request $request, $course)
     {
-        if ($course->status !== 'pending') {
+        $courseModel = Course::withTrashed()->findOrFail($course);
+        
+        if ($courseModel->status !== 'pending') {
             return response()->json(['message' => 'Course already processed'], 400);
         }
 
         try {
             DB::beginTransaction();
             
-            $course->status = 'approved';
-            $course->save();
-            $course->refresh(); // Refresh to get updated data
+            $courseModel->status = 'approved';
+            $courseModel->save();
+            $courseModel->refresh(); // Refresh to get updated data
             
             DB::commit();
             return response()->json([
                 'success' => true,
-                'course' => $course
+                'course' => $courseModel
             ]);
         } catch (\Exception $e) {
             DB::rollback();
@@ -76,25 +79,27 @@ class AdminController extends Controller
         }
     }
 
-    public function rejectCourseRequest(Request $request, Course $course)
+    public function rejectCourseRequest(Request $request, $course)
     {
+        $courseModel = Course::withTrashed()->findOrFail($course);
+        
         try {
             DB::beginTransaction();
             
-            if ($course->status === 'pending') {
-                $course->status = 'rejected';
-                $course->save();
-                $course->refresh(); // Refresh to get updated data
+            if ($courseModel->status === 'pending') {
+                $courseModel->status = 'rejected';
+                $courseModel->save();
+                $courseModel->refresh(); // Refresh to get updated data
                 
                 // Delete the course and all related data
-                $this->deleteCourseCascade($course);
+                $this->deleteCourseCascade($courseModel);
             }
             
             DB::commit();
             return response()->json([
                 'success' => true,
                 'message' => 'Course rejected and deleted successfully', 
-                'course' => $course
+                'course' => $courseModel
             ]);
         } catch (\Exception $e) {
             DB::rollback();
@@ -165,25 +170,27 @@ class AdminController extends Controller
     }
 
     // Delete a teacher and cascade delete their classes and related data
-    public function deleteTeacher(Request $request, User $user)
+    public function deleteTeacher(Request $request, $user)
     {
-        abort_if($user->role !== 'teacher', 403, 'User is not a teacher');
+        $teacher = User::withTrashed()->findOrFail($user);
+        
+        abort_if($teacher->role !== 'teacher', 403, 'User is not a teacher');
 
         try {
             DB::beginTransaction();
 
             // Get all classes belonging to this teacher
-            $classes = ClassModel::where('teacher_id', $user->id)->get();
+            $classes = ClassModel::where('teacher_id', $teacher->id)->get();
 
             foreach ($classes as $class) {
                 $this->deleteClassData($class);
             }
 
             // Delete all class requests by this teacher
-            \App\Models\ClassRequest::where('teacher_id', $user->id)->delete();
+            \App\Models\ClassRequest::where('teacher_id', $teacher->id)->delete();
 
             // Delete the teacher user
-            $user->delete();
+            $teacher->delete();
 
             DB::commit();
 
@@ -195,12 +202,14 @@ class AdminController extends Controller
     }
 
     // Delete a class and cascade delete courses, quizzes, exams, and join requests
-    public function deleteClass(Request $request, ClassModel $class)
+    public function deleteClass(Request $request, $class)
     {
+        $classModel = ClassModel::withTrashed()->findOrFail($class);
+        
         try {
             DB::beginTransaction();
 
-            $this->deleteClassData($class);
+            $this->deleteClassData($classModel);
 
             DB::commit();
 
@@ -212,12 +221,14 @@ class AdminController extends Controller
     }
 
     // Delete a course and cascade delete quizzes, exams, posts
-    public function deleteCourse(Request $request, Course $course)
+    public function deleteCourse(Request $request, $course)
     {
+        $courseModel = Course::withTrashed()->findOrFail($course);
+        
         try {
             DB::beginTransaction();
 
-            $this->deleteCourseCascade($course);
+            $this->deleteCourseCascade($courseModel);
 
             DB::commit();
 
@@ -243,7 +254,11 @@ class AdminController extends Controller
         $exams = Exam::where('course_id', $course->id)->get();
         foreach ($exams as $exam) {
             ExamQuestion::where('exam_id', $exam->id)->delete();
-            ExamAnswer::where('exam_id', $exam->id)->delete();
+            // Delete exam answers through exam results
+            $examResults = ExamResult::where('exam_id', $exam->id)->get();
+            foreach ($examResults as $result) {
+                ExamAnswer::where('exam_result_id', $result->id)->delete();
+            }
             ExamResult::where('exam_id', $exam->id)->delete();
             $exam->delete();
         }
@@ -276,7 +291,11 @@ class AdminController extends Controller
             $exams = Exam::where('course_id', $course->id)->get();
             foreach ($exams as $exam) {
                 ExamQuestion::where('exam_id', $exam->id)->delete();
-                ExamAnswer::where('exam_id', $exam->id)->delete();
+                // Delete exam answers through exam results
+                $examResults = ExamResult::where('exam_id', $exam->id)->get();
+                foreach ($examResults as $result) {
+                    ExamAnswer::where('exam_result_id', $result->id)->delete();
+                }
                 ExamResult::where('exam_id', $exam->id)->delete();
                 $exam->delete();
             }

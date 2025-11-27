@@ -15,7 +15,7 @@ class TeacherController extends Controller
 {
     public function joinRequests(Request $request)
     {
-        $ids = ClassModel::where('teacher_id', $request->user()->id)->pluck('id');
+        $ids = ClassModel::where('teacher_id', $request->user()->id)->whereNull('deleted_at')->pluck('id');
         return JoinRequest::with(['student', 'class'])
             ->whereIn('class_id', $ids)
             ->where('status', 'pending')
@@ -60,6 +60,7 @@ class TeacherController extends Controller
     {
         return ClassModel::withCount('students')
             ->where('teacher_id', $request->user()->id)
+            ->whereNull('deleted_at')
             ->latest()
             ->get();
     }
@@ -184,9 +185,10 @@ class TeacherController extends Controller
     {
         abort_unless($class->teacher_id === $request->user()->id, 403);
         
-        // Get courses for this class (class_id matches)
+        // Get courses for this class (exclude soft-deleted)
         $courses = \App\Models\Course::with('teacher', 'supports')
             ->where('class_id', $class->id)
+            ->whereNull('deleted_at')
             ->latest()
             ->get();
 

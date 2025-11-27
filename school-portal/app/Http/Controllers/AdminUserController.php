@@ -10,8 +10,8 @@ class AdminUserController extends Controller
 {
     public function index(Request $request)
     {
-        // include soft-deleted users so admin can see deleted teachers
-        return User::withTrashed()->latest()->get();
+        // Exclude soft-deleted users from admin UI
+        return User::latest()->get();
     }
 
     public function store(Request $request)
@@ -32,7 +32,8 @@ class AdminUserController extends Controller
 
     public function show(Request $request, User $user)
     {
-        return $user;
+        // Include soft-deleted users to match the index behavior
+        return User::withTrashed()->find($user->id);
     }
 
     public function update(Request $request, User $user)

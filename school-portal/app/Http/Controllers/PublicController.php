@@ -12,6 +12,7 @@ class PublicController extends Controller
         $courses = Course::with('teacher','supports')
             ->where('is_public', true)
             ->whereNull('class_id')  // Only show courses that are not class-specific
+            ->whereNull('deleted_at') // Exclude soft-deleted courses
             ->latest()
             ->get();
         

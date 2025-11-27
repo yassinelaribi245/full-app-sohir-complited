@@ -64,9 +64,10 @@ class StudentController extends Controller
             return response()->json(['message' => 'You are not enrolled in this class'], 403);
         }
 
-        // Get courses for this class (class_id matches)
+        // Get courses for this class (exclude soft-deleted)
         $courses = \App\Models\Course::with('teacher', 'supports')
             ->where('class_id', $class->id)
+            ->whereNull('deleted_at')
             ->latest()
             ->get();
 
